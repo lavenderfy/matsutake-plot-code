@@ -1,0 +1,169 @@
+
+meta_raw <- read_excel("meta_all.xls", col_names = TRUE)
+meta_raw <- as.data.frame(meta_raw)
+rownames(meta_raw) <- meta_raw[,1]
+meta_raw <- meta_raw[, -1]
+
+
+abundance <- meta_raw[, setdiff(colnames(meta_raw), "taxonomy")]
+taxonomy <- meta_raw$taxonomy
+
+
+kingdom <- str_extract(taxonomy, "k__[^;]+")
+kingdom <- gsub("k__", "", kingdom)
+kingdom[is.na(kingdom)] <- "unclassified"
+
+genus <- str_extract(taxonomy, "g__[^;]+")
+genus <- gsub("g__", "", genus)
+genus[is.na(genus)] <- "unclassified"
+
+
+abund_with <- abundance
+abund_with$Genus <- genus
+abund_with$Kingdom <- kingdom
+
+
+samp_prefix <- c("QZGT", "XRT", "YRT")
+
+
+microbe_raw <- abund_with %>%
+  group_by(Genus) %>%
+  summarise(across(starts_with(samp_prefix), sum, na.rm = TRUE)) %>%
+  as.data.frame()
+rownames(microbe_raw) <- microbe_raw$Genus
+microbe_abund <- as.data.frame(t(microbe_raw[, -1]))  
+
+
+env_raw <- read_excel("Env.xls", col_names = TRUE)
+env_raw <- as.data.frame(env_raw)
+rownames(env_raw) <- env_raw$SampleID
+env_raw <- env_raw[, -1]
+
+
+env_raw <- env_raw[rownames(microbe_abund), ]
+
+
+if (!all(rownames(microbe_abund) == rownames(env_raw))) {
+  stop("样本顺序不一致，请检查数据！")
+}
+
+
+
+env_scaled <- as.data.frame(scale(env_raw, center = TRUE, scale = TRUE))
+
+
+env_CN <- env_scaled[, c("OM", "TC", "TN", "AHN")]
+
+
+env_PK <- env_scaled[, c("TP", "AP", "TK", "SAK", "RAK")]
+
+
+env_pH <- env_scaled[, "PH", drop = FALSE]
+
+
+
+
+microbe_hel <- decostand(microbe_abund, method = "hellinger")
+
+
+vpa_result <- varpart(microbe_hel, env_CN, env_PK, env_pH)
+
+
+print(vpa_result)
+
+
+
+indfract <- vpa_result$part$indfract
+adj_r2 <- indfract$Adj.R.square
+names(adj_r2) <- c("a", "b", "c", "d", "e", "f", "g", "h")
+
+
+adj_r2_clean <- ifelse(adj_r2 < 0, 0, adj_r2)
+
+
+total_expl <- sum(adj_r2_clean[1:7])
+residual <- 1 - total_expl
+
+
+components <- c("CN (独立)", "PK (独立)", "pH (独立)", 
+                "CN ∩ PK", "CN ∩ pH", "PK ∩ pH", 
+                "CN ∩ PK ∩ pH", "残差")
+explained <- c(adj_r2_clean[1:7], residual)
+percent <- explained * 100
+notes <- c(rep("", 3), "", 
+           ifelse(adj_r2[5] < 0, "<0.01", ""), 
+           ifelse(adj_r2[6] < 0, "<0.01", ""), 
+           "", "")
+
+vpa_table <- data.frame(
+  组分 = components,
+  Adj_R2 = round(explained, 4),
+  解释率 = round(percent, 2),
+  备注 = notes
+)
+
+
+vpa_table <- rbind(vpa_table, 
+                   data.frame(组分 = "总解释率", 
+                              Adj_R2 = round(total_expl, 4), 
+                             解释率 = round(total_expl * 100, 2), 
+                             备注 = ""))
+
+print(vpa_table)
+write.csv(vpa_table, "VPA_Results_Table.csv", row.names = FALSE)
+
+
+
+sets <- list(
+  CN = c("a", "d", "e", "g"),
+  PK = c("b", "d", "f", "g"),
+  pH = c("c", "e", "f", "g")
+)
+
+venn_obj <- Venn(sets)
+data_venn <- process_data(venn_obj)
+
+
+region_order <- c("a", "b", "c", "d", "e", "f", "g")
+region_labels <- data.frame(
+  region = region_order,
+  label = paste0(round(adj_r2_clean[1:7] * 100, 1), "%")
+)
+
+
+region_data <- venn_region(data_venn) %>%
+  left_join(region_labels, by = "region")
+
+
+my_colors <- c("#E69F00", "#56B4E9", "#009E73")  
+
+p_venn <- ggplot() +
+ 
+  geom_sf(aes(fill = id), data = venn_region(data_venn), alpha = 0.35) +
+  
+  geom_text(data = venn_setlabel(data_venn),
+            aes(x = x, y = y, label = name), 
+            size = 7, fontface = "bold") +
+  
+  geom_text(data = region_data,
+            aes(x = x, y = y, label = label), 
+            size = 5, fontface = "bold") +
+  
+  scale_fill_manual(values = my_colors, guide = "none") +
+ 
+  theme_void() +
+  
+  labs(title = paste0("VPA: Total explained = ", round(total_expl * 100, 1), "%")) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    plot.margin = margin(20, 20, 20, 20)
+  )
+
+
+print(p_venn)
+
+
+ggsave("VPA_Venn_ggVennDiagram.pdf", p_venn, width = 6, height = 5)
+ggsave("VPA_Venn_ggVennDiagram.png", p_venn, width = 6, height = 5, dpi = 300)
+
+
