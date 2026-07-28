@@ -1,0 +1,42 @@
+library(vegan)
+library(ggplot2)
+
+
+all_fungi_num <- all_fungi[, !colnames(all_fungi) %in% c("Site", "Part")]
+
+
+all_fungi_hel <- decostand(all_fungi_num, method = "hellinger")
+
+
+dist_fungi <- vegdist(all_fungi_hel, method = "bray")
+
+
+pcoa_f <- cmdscale(dist_fungi, k = 2, eig = TRUE)
+pcoa_scores_f <- as.data.frame(pcoa_f$points)
+colnames(pcoa_scores_f) <- c("PCoA1", "PCoA2")
+pcoa_scores_f$Site <- all_fungi$Site
+pcoa_scores_f$Part <- all_fungi$Part
+
+
+eig_f <- pcoa_f$eig
+var1_f <- round(eig_f[1] / sum(eig_f) * 100, 1)
+var2_f <- round(eig_f[2] / sum(eig_f) * 100, 1)
+
+
+p_pcoa_f <- ggplot(pcoa_scores_f, aes(x = PCoA1, y = PCoA2, color = Site, shape = Part)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  stat_ellipse(aes(group = interaction(Site, Part)), linetype = "dashed", alpha = 0.2) +
+  labs(x = paste0("PCoA1 (", var1_f, "%)"),
+       y = paste0("PCoA2 (", var2_f, "%)"),
+       title = "Fungal Community PCoA") +
+  theme_bw() +
+  scale_color_manual(values = c("QZG" = "#E69F00", "XRT" = "#56B4E9", "YRT" = "#009E73")) +
+  scale_shape_manual(values = c("soil" = 16, "root" = 17, "stipe" = 15, "pileus" = 18))
+
+print(p_pcoa_f)
+ggsave("PCoA_Fungi.pdf", p_pcoa_f, width = 6, height = 5)
+
+
+group_info_f <- all_fungi[, c("Site", "Part")]
+permanova_f <- adonis2(dist_fungi ~ Part * Site, data = group_info_f, permutations = 999, by = "terms")
+print(permanova_f)
