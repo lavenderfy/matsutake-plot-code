@@ -1,0 +1,99 @@
+
+
+library(readxl)
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+
+
+kegg_raw <- read_excel("KEGG_pathway.xls", col_names = TRUE)
+kegg_raw <- as.data.frame(kegg_raw)
+
+
+
+print(colnames(kegg_raw))
+
+
+pathway_ids <- kegg_raw[, 1]  
+kegg_desc <- kegg_raw[, ncol(kegg_raw)]  
+
+
+kegg_abund <- kegg_raw[, 2:(ncol(kegg_raw) - 1)]
+
+
+kegg_abund <- as.data.frame(lapply(kegg_abund, as.numeric))
+
+
+rownames(kegg_abund) <- pathway_ids
+
+
+kegg_t <- as.data.frame(t(kegg_abund))
+
+
+samples <- rownames(kegg_t)
+site <- substr(samples, 1, 3)
+site <- ifelse(site %in% c("XR1","XR2","XR3"), "XRT",
+               ifelse(site %in% c("YR1","YR2","YR3"), "YRT",
+                      ifelse(site == "QZG", "QZG", site)))
+
+
+simple_names <- sapply(strsplit(kegg_desc, "; "), tail, 1)
+
+if (any(duplicated(simple_names))) {
+  simple_names <- make.unique(simple_names, sep = "_")
+}
+
+full_labels <- paste0(pathway_ids, ": ", simple_names)
+names(full_labels) <- pathway_ids  
+
+
+avg_abund <- colMeans(kegg_t, na.rm = TRUE)
+top30_pathways <- names(sort(avg_abund, decreasing = TRUE))[1:30]
+
+
+top30_mat <- kegg_t[, top30_pathways]
+
+
+colnames(top30_mat) <- full_labels[top30_pathways]
+
+
+top30_scaled <- scale(top30_mat, center = TRUE, scale = TRUE)
+
+
+annotation_row <- data.frame(Site = site)
+rownames(annotation_row) <- rownames(top30_mat)
+
+ann_colors <- list(
+  Site = c(QZG = "#E69F00", XRT = "#56B4E9", YRT = "#009E73")
+)
+
+
+pheatmap(top30_scaled,
+         main = "Top 30 KEGG Pathways (Metagenome)",
+         annotation_row = annotation_row,
+         annotation_colors = ann_colors,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+         fontsize_row = 10,
+         fontsize_col = 6.5,
+         angle_col = 45,
+         border_color = NA,
+         treeheight_row = 20,
+         treeheight_col = 20,
+         filename = "Heatmap_Top30_KEGG.pdf",
+         width = 12,
+         height = 6
+)
+
+
+top30_info <- data.frame(
+  Pathway_ID = top30_pathways,
+  Pathway_Label = full_labels[top30_pathways],
+  Mean_Abundance = avg_abund[top30_pathways]
+)
+write.csv(top30_info, "Top30_KEGG_Pathways.csv", row.names = FALSE)
+
