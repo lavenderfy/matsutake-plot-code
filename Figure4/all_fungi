@@ -1,0 +1,88 @@
+
+  colnames(fungi_abundance) <- gsub("^g__", "", colnames(fungi_abundance))
+  colnames(amp_fungi_t) <- gsub("^g__", "", colnames(amp_fungi_t))
+  
+  
+  common_fungi <- intersect(colnames(fungi_abundance), colnames(amp_fungi_t))
+  
+  
+  
+  macro_fungi <- fungi_abundance[, common_fungi]
+  amp_fungi_common <- amp_fungi_t[, common_fungi]
+  
+  
+  all_fungi <- rbind(macro_fungi, amp_fungi_common)
+  
+ 
+  all_fungi$Site <- c(
+    rep(c("QZG", "XRT", "YRT"), each = 5),  
+    amp_fungi_t$Site
+  )
+  all_fungi$Part <- c(
+    rep("soil", 15),
+    amp_fungi_t$Part
+  )
+  all_fungi$Part <- factor(all_fungi$Part, levels = c("soil", "root", "stipe", "pileus"))
+  
+  
+}
+
+
+all_fungi_num <- all_fungi[, !colnames(all_fungi) %in% c("Site", "Part")]
+all_fungi_parts <- all_fungi[, c("Site", "Part")]
+
+
+avg_by_part_f <- all_fungi_num %>%
+  as.data.frame() %>%
+  mutate(Part = all_fungi_parts$Part) %>%
+  group_by(Part) %>%
+  summarise(across(everything(), mean, na.rm = TRUE)) %>%
+  as.data.frame()
+
+
+total_avg_f <- colMeans(all_fungi_num, na.rm = TRUE)
+top30_f <- names(sort(total_avg_f, decreasing = TRUE))[1:min(30, length(total_avg_f))]
+
+
+desired_parts_f <- c("root", "stipe", "pileus")
+mat_f <- avg_by_part_f %>%
+  filter(Part %in% desired_parts_f) %>%
+  select(Part, all_of(top30_f)) %>%
+  column_to_rownames("Part") %>%
+  as.matrix()
+
+
+row_sums_f <- rowSums(mat_f)
+prop_mat_f <- mat_f / row_sums_f
+
+
+soil_avg_f <- avg_by_part_f %>%
+  filter(Part == "soil") %>%
+  select(all_of(top30_f)) %>%
+  as.numeric()
+names(soil_avg_f) <- top30_f
+
+
+abund_df <- as.data.frame(t(mat_f))
+colnames(abund_df) <- paste0(colnames(abund_df), "_abund")
+abund_df$soil <- soil_avg_f[rownames(abund_df)]
+
+
+prop_df <- as.data.frame(t(prop_mat_f))
+colnames(prop_df) <- paste0(colnames(prop_df), "_prop")
+
+
+fungi_table <- cbind(
+  Genus = rownames(abund_df),
+  abund_df,
+  prop_df
+)
+
+）
+fungi_table <- fungi_table[order(fungi_table$soil, decreasing = TRUE), ]
+
+
+write.csv(fungi_table, "Top30_fungi_abundance_and_proportion.csv", row.names = FALSE)
+
+
+print(head(fungi_table, 10))
