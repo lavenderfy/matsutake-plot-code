@@ -1,0 +1,84 @@
+
+
+library(igraph)
+library(ggplot2)
+
+
+nodes <- data.frame(
+  name = unique(c(cor_pairs$Microbe, cor_pairs$Metabolite)),
+  type = c(rep("Microbe", length(unique(cor_pairs$Microbe))),
+           rep("Metabolite", length(unique(cor_pairs$Metabolite))))
+)
+
+
+edges <- data.frame(
+  from = cor_pairs$Microbe,
+  to = cor_pairs$Metabolite,
+  weight = cor_pairs$Correlation
+)
+
+
+g <- graph_from_data_frame(edges, vertices = nodes, directed = FALSE)
+
+
+set.seed(123)  
+
+layout <- layout_with_fr(g, weights = abs(E(g)$weight))
+
+
+V(g)$size <- ifelse(V(g)$type == "Microbe", 20, 12)
+
+
+V(g)$color <- ifelse(V(g)$type == "Microbe", "#D55E00", "#0072B2")
+
+
+V(g)$frame.color <- "gray40"
+V(g)$frame.width <- 0.5
+
+
+V(g)$label <- gsub("^Bac_", "", V(g)$name)
+V(g)$label <- gsub("^Fun_", "", V(g)$label)
+
+
+V(g)$label.cex <- 0.6
+V(g)$label.color <- "black"
+
+
+E(g)$color <- ifelse(E(g)$weight > 0, "#E41A1C", "#56B4E9")
+
+
+E(g)$width <- abs(E(g)$weight) * 4
+
+
+pdf("Microbe_Metabolite_Network.pdf", width = 12, height = 10)
+
+plot(g,
+     layout = layout,
+     vertex.size = V(g)$size,
+     vertex.color = V(g)$color,
+     vertex.frame.color = V(g)$frame.color,
+     vertex.frame.width = V(g)$frame.width,
+     vertex.label = V(g)$label,
+     vertex.label.cex = V(g)$label.cex,
+     vertex.label.color = V(g)$label.color,
+     vertex.label.dist = 0.5,        
+     edge.color = E(g)$color,
+     edge.width = E(g)$width,
+     edge.arrow.size = 0,            
+     main = "Microbe-Metabolite Association Network",
+     margin = 0.1
+)
+
+
+legend("bottomright",
+       legend = c("Microbe", "Metabolite", "Positive correlation", "Negative correlation"),
+       col = c("#D55E00", "#0072B2", "#E41A1C", "#56B4E9"),
+       pch = c(19, 19, NA, NA),
+       lty = c(NA, NA, 1, 1),
+       lwd = c(NA, NA, 2, 2),
+       bty = "n",
+       cex = 1.2)
+
+dev.off()
+
+
