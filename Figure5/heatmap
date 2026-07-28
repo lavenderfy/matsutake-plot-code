@@ -1,0 +1,58 @@
+
+
+library(pheatmap)
+library(RColorBrewer)
+library(tidyverse)
+
+
+
+
+microbe_list <- unique(cor_pairs$Microbe)
+metab_list <- unique(cor_pairs$Metabolite)
+
+
+cor_sub <- cor_mat[microbe_list, metab_list]
+
+
+if (exists("name_map")) {
+  
+  metab_names <- name_map$Name[match(metab_list, name_map$Kegg_ID)]
+  
+  metab_names[is.na(metab_names)] <- metab_list[is.na(metab_names)]
+  colnames(cor_sub) <- metab_names
+} else {
+ 
+}
+
+
+rownames(cor_sub) <- gsub("^Bac_", "", rownames(cor_sub))
+rownames(cor_sub) <- gsub("^Fun_", "", rownames(cor_sub))
+
+
+row_order <- names(sort(rowMeans(cor_sub, na.rm = TRUE), decreasing = TRUE))
+cor_sub <- cor_sub[row_order, ]
+
+
+my_colors <- colorRampPalette(c("navy", "white", "firebrick3"))(50)
+
+pheatmap(cor_sub,
+         main = "Microbe-Metabolite Association Heatmap",
+         color = my_colors,
+         cluster_rows = TRUE,          
+         cluster_cols = TRUE,          
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         display_numbers = TRUE,       
+         number_format = "%.2f",       
+         fontsize_row = 10,
+         fontsize_col = 8,
+         angle_col = 45,
+         border_color = NA,
+         treeheight_row = 20,
+         treeheight_col = 20,
+         filename = "Microbe_Metabolite_Heatmap.pdf",
+         width = 10,
+         height = 6
+)
+
