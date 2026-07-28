@@ -1,0 +1,53 @@
+
+avg_top30 <- avg_by_part %>%
+  filter(Part %in% c("soil", "root", "stipe", "pileus")) %>%
+  select(Part, all_of(top30))
+
+
+avg_top30_wide <- avg_top30 %>%
+  pivot_longer(cols = -Part, names_to = "Genus", values_to = "Abundance") %>%
+  pivot_wider(names_from = Part, values_from = Abundance)
+
+
+genus_order <- avg_top30_wide$Genus[order(avg_top30_wide$soil, decreasing = TRUE)]
+avg_top30_wide <- avg_top30_wide %>%
+  mutate(Genus = factor(Genus, levels = genus_order)) %>%
+  arrange(Genus)
+
+
+write.csv(avg_top30_wide, "Top30_genera_abundance_by_part.csv", row.names = FALSE)
+
+
+prop_df <- as.data.frame(prop_mat)
+prop_df$Part <- rownames(prop_df)
+prop_df <- prop_df %>%
+  select(Part, everything())  
+
+
+prop_wide <- prop_df %>%
+  pivot_longer(cols = -Part, names_to = "Genus", values_to = "Proportion") %>%
+  pivot_wider(names_from = Part, values_from = Proportion)
+
+
+prop_wide <- prop_wide %>%
+  mutate(Genus = factor(Genus, levels = levels(avg_top30_wide$Genus))) %>%
+  arrange(Genus)
+
+
+write.csv(prop_wide, "Top30_genera_proportion_in_fruitbody.csv", row.names = FALSE)
+
+
+total_avg_df <- data.frame(
+  Genus = names(total_avg),
+  Total_Mean_Abundance = total_avg
+)
+total_avg_df <- total_avg_df[order(total_avg_df$Total_Mean_Abundance, decreasing = TRUE), ]
+write.csv(total_avg_df, "Total_mean_abundance_all_genera.csv", row.names = FALSE)
+
+
+combined_table <- avg_top30_wide %>%
+  left_join(prop_wide, by = "Genus", suffix = c("_abund", "_prop"))
+
+
+write.csv(combined_table, "Top30_genera_abundance_and_proportion.csv", row.names = FALSE)
+
