@@ -1,0 +1,95 @@
+
+
+library(readxl)
+library(tidyverse)
+library(vegan)
+library(pheatmap)
+library(RColorBrewer)
+library(stringr)
+
+
+meta_raw <- read_excel("meta_all.xls", col_names = TRUE)
+meta_raw <- as.data.frame(meta_raw)
+rownames(meta_raw) <- meta_raw[,1]
+meta_raw <- meta_raw[, -1]
+
+
+abundance <- meta_raw[, setdiff(colnames(meta_raw), "taxonomy")]
+taxonomy <- meta_raw$taxonomy
+
+
+genus <- str_extract(taxonomy, "g__[^;]+")
+genus <- gsub("g__", "", genus)
+genus[is.na(genus)] <- "unclassified"
+
+
+abund_with_genus <- abundance
+abund_with_genus$Genus <- genus
+
+genus_abund <- abund_with_genus %>%
+  group_by(Genus) %>%
+  summarise(across(everything(), sum, na.rm = TRUE)) %>%
+  as.data.frame()
+rownames(genus_abund) <- genus_abund$Genus
+genus_abund <- genus_abund[, -1]  
+
+
+genus_t <- as.data.frame(t(genus_abund))
+
+
+samples <- rownames(genus_t)
+site <- substr(samples, 1, 3)
+site <- ifelse(site %in% c("XR1","XR2","XR3"), "XRT",
+               ifelse(site %in% c("YR1","YR2","YR3"), "YRT",
+                      ifelse(site == "QZG", "QZG", site)))
+
+
+avg_abund <- colMeans(genus_t, na.rm = TRUE)
+top30_genus <- names(sort(avg_abund, decreasing = TRUE))[1:30]
+
+
+top30_mat <- genus_t[, top30_genus]
+
+
+top30_scaled <- scale(top30_mat, center = TRUE, scale = TRUE)
+
+
+annotation_row <- data.frame(Site = site)
+rownames(annotation_row) <- rownames(top30_mat)
+
+
+ann_colors <- list(
+  Site = c(QZG = "#E69F00", XRT = "#56B4E9", YRT = "#009E73")
+)
+
+
+pheatmap(top30_scaled,
+         main = "Top 30 Microbial Genera (Metagenome)",
+         annotation_row = annotation_row,
+         annotation_colors = ann_colors,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+         fontsize_row = 10,
+         fontsize_col = 8,
+         angle_col = 45,
+         border_color = NA,
+         treeheight_row = 20,
+         treeheight_col = 20,
+         filename = "Heatmap_Top30_Metagenome.pdf",
+         width = 8,
+         height = 6
+)
+
+
+top30_abund <- data.frame(
+  Genus = top30_genus,
+  Mean_Abundance = avg_abund[top30_genus]
+)
+write.csv(top30_abund, "Top30_Metagenome_Genera.csv", row.names = FALSE)
+
+cat("✅ 热图已保存为 Heatmap_Top30_Metagenome.pdf\n")
+cat("✅ TOP30 属列表已保存为 Top30_Metagenome_Genera.csv\n")
