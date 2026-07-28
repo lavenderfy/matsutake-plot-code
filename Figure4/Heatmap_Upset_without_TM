@@ -1,0 +1,143 @@
+
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+library(UpSetR)
+
+
+if ("Tricholoma" %in% colnames(all_fungi)) {
+  cat("正在移除 Tricholoma...\n")
+  all_fungi_no_t <- all_fungi[, !colnames(all_fungi) %in% c("Tricholoma", "Site", "Part")]
+  
+  all_fungi_no_t$Site <- all_fungi$Site
+  all_fungi_no_t$Part <- all_fungi$Part
+} else {
+  cat("Tricholoma 不存在，继续使用原数据\n")
+  all_fungi_no_t <- all_fungi
+}
+
+
+cat("移除后的列数（不含 Site, Part）：", 
+    ncol(all_fungi_no_t) - 2, "\n")
+
+
+all_fungi_num_no_t <- all_fungi_no_t[, !colnames(all_fungi_no_t) %in% c("Site", "Part")]
+all_fungi_parts <- all_fungi_no_t[, c("Site", "Part")]
+
+
+avg_by_part_f_no_t <- all_fungi_num_no_t %>%
+  as.data.frame() %>%
+  mutate(Part = all_fungi_parts$Part) %>%
+  group_by(Part) %>%
+  summarise(across(everything(), mean, na.rm = TRUE)) %>%
+  as.data.frame()
+
+
+total_avg_f_no_t <- colMeans(all_fungi_num_no_t, na.rm = TRUE)
+n_top <- min(30, length(total_avg_f_no_t))
+top30_f_no_t <- names(sort(total_avg_f_no_t, decreasing = TRUE))[1:n_top]
+
+cat("Top 30 属（不含 Tricholoma）：\n")
+print(top30_f_no_t)
+
+
+desired_parts_f <- c("root", "stipe", "pileus")
+mat_f_no_t <- avg_by_part_f_no_t %>%
+  filter(Part %in% desired_parts_f) %>%
+  select(Part, all_of(top30_f_no_t)) %>%
+  column_to_rownames("Part") %>%
+  as.matrix()
+
+
+row_sums_f_no_t <- rowSums(mat_f_no_t)
+prop_mat_f_no_t <- mat_f_no_t / row_sums_f_no_t
+
+
+soil_avg_f_no_t <- avg_by_part_f_no_t %>%
+  filter(Part == "soil") %>%
+  select(all_of(top30_f_no_t)) %>%
+  as.numeric()
+names(soil_avg_f_no_t) <- top30_f_no_t
+
+
+abund_df_f_no_t <- as.data.frame(t(mat_f_no_t))
+colnames(abund_df_f_no_t) <- paste0(colnames(abund_df_f_no_t), "_abund")
+abund_df_f_no_t$soil <- soil_avg_f_no_t[rownames(abund_df_f_no_t)]
+
+prop_df_f_no_t <- as.data.frame(t(prop_mat_f_no_t))
+colnames(prop_df_f_no_t) <- paste0(colnames(prop_df_f_no_t), "_prop")
+
+fungi_table_no_t <- cbind(
+  Genus = rownames(abund_df_f_no_t),
+  abund_df_f_no_t,
+  prop_df_f_no_t
+)
+fungi_table_no_t <- fungi_table_no_t[order(fungi_table_no_t$soil, decreasing = TRUE), ]
+percent_cols <- grep("_prop$", colnames(fungi_table_no_t))
+fungi_table_no_t[, percent_cols] <- round(fungi_table_no_t[, percent_cols] * 100, 1)
+
+write.csv(fungi_table_no_t, "Top30_fungi_without_Tricholoma.csv", row.names = FALSE)
+
+
+desired_parts_all <- c("soil", "root", "stipe", "pileus")
+mat_full_f_no_t <- avg_by_part_f_no_t %>%
+  filter(Part %in% desired_parts_all) %>%
+  select(Part, all_of(top30_f_no_t)) %>%
+  column_to_rownames("Part") %>%
+  as.matrix()
+
+
+row_sums_full <- rowSums(mat_full_f_no_t)
+prop_full_f_no_t <- mat_full_f_no_t / row_sums_full
+
+
+prop_scaled_f_no_t <- scale(prop_full_f_no_t, center = TRUE, scale = TRUE)
+
+
+row_order_f_no_t <- rev(c("soil", "root", "stipe", "pileus"))
+prop_scaled_f_no_t <- prop_scaled_f_no_t[row_order_f_no_t, ]
+
+
+pheatmap(prop_scaled_f_no_t,
+         main = "Top 30 Fungal Genera (without Tricholoma)",
+         cluster_rows = FALSE,
+         cluster_cols = TRUE,
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+         fontsize_row = 12,
+         fontsize_col = 6,
+         angle_col = 45,
+         border_color = NA,
+         filename = "Heatmap_Fungi_Top30_without_Tricholoma.pdf")
+
+
+fungi_presence_no_t <- all_fungi_num_no_t
+fungi_presence_no_t[fungi_presence_no_t > 0] <- 1
+
+
+parts <- c("soil", "root", "stipe", "pileus")
+presence_list_no_t <- list()
+for (p in parts) {
+  idx <- all_fungi_parts$Part == p
+  presence_list_no_t[[p]] <- as.integer(colSums(fungi_presence_no_t[idx, ]) > 0)
+}
+presence_df_no_t <- as.data.frame(presence_list_no_t)
+presence_df_no_t <- presence_df_no_t[, colSums(presence_df_no_t) > 0]
+
+
+library(UpSetR)
+pdf("Upset_Fungi_without_Tricholoma.pdf", width = 10, height = 7)
+upset(presence_df_no_t,
+      sets = c("soil", "root", "stipe", "pileus"),
+      keep.order = TRUE,
+      order.by = "freq",
+      main.bar.color = "#CC79A7",
+      matrix.color = "#0072B2",
+      sets.bar.color = c("#999999", "#D55E00", "#CC79A7", "#0072B2"),
+      point.size = 3.5,
+      line.size = 1.2,
+      mb.ratio = c(0.6, 0.4))
+dev.off()
+
+
+cat("\n===== 去除 Tricholoma 后的 Top10 属（子实体占比）=====\n")
+print(head(fungi_table_no_t[, c("Genus", "root_prop", "stipe_prop", "pileus_prop")], 10))
