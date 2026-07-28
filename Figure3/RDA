@@ -1,0 +1,223 @@
+
+
+library(readxl)
+library(tidyverse)
+library(vegan)
+library(ggplot2)
+library(stringr)
+
+
+meta_raw <- read_excel("meta_all.xls", col_names = TRUE)
+meta_raw <- as.data.frame(meta_raw)
+rownames(meta_raw) <- meta_raw[,1]
+meta_raw <- meta_raw[, -1]
+
+abundance <- meta_raw[, setdiff(colnames(meta_raw), "taxonomy")]
+taxonomy <- meta_raw$taxonomy
+
+kingdom <- str_extract(taxonomy, "k__[^;]+")
+kingdom <- gsub("k__", "", kingdom)
+kingdom[is.na(kingdom)] <- "unclassified"
+
+genus <- str_extract(taxonomy, "g__[^;]+")
+genus <- gsub("g__", "", genus)
+genus[is.na(genus)] <- "unclassified"
+
+abund_with <- abundance
+abund_with$Genus <- genus
+abund_with$Kingdom <- kingdom
+
+samp_prefix <- c("QZGT", "XRT", "YRT")
+
+
+bact_raw <- abund_with %>%
+  filter(Kingdom == "Bacteria") %>%
+  group_by(Genus) %>%
+  summarise(across(starts_with(samp_prefix), sum, na.rm = TRUE)) %>%
+  as.data.frame()
+rownames(bact_raw) <- bact_raw$Genus
+bact_abund <- as.data.frame(t(bact_raw[, -1]))
+
+
+fung_raw <- abund_with %>%
+  filter(Kingdom == "Fungi") %>%
+  group_by(Genus) %>%
+  summarise(across(starts_with(samp_prefix), sum, na.rm = TRUE)) %>%
+  as.data.frame()
+rownames(fung_raw) <- fung_raw$Genus
+fung_abund <- as.data.frame(t(fung_raw[, -1]))
+
+# KEGG
+kegg_raw <- read_excel("KEGG_pathway.xls", col_names = TRUE)
+kegg_raw <- as.data.frame(kegg_raw)
+kegg_abund <- kegg_raw[, !colnames(kegg_raw) %in% "Description"]
+rownames(kegg_abund) <- kegg_abund[,1]
+kegg_abund <- kegg_abund[, -1]
+kegg_abund <- as.data.frame(lapply(kegg_abund, as.numeric))
+kegg_t <- as.data.frame(t(kegg_abund))
+
+
+env_raw <- read_excel("Env.xls", col_names = TRUE)
+env_raw <- as.data.frame(env_raw)
+rownames(env_raw) <- env_raw$SampleID
+env_raw <- env_raw[, -1]
+env_raw <- env_raw[rownames(bact_abund), ]
+env_scaled <- as.data.frame(scale(env_raw, center = TRUE, scale = TRUE))
+
+
+run_rda_all <- function(comm_abund, env_scaled, title) {
+  
+  comm_hel <- decostand(comm_abund, method = "hellinger")
+  rda_model <- rda(comm_hel ~ ., data = env_scaled)
+
+  anova_global <- anova(rda_model, permutations = 999)
+  cat("\n===== ", title, " RDA 整体检验 =====\n")
+  print(anova_global)
+  
+ 
+  site_scores <- scores(rda_model, display = "sites") %>% as.data.frame()
+  site_scores$Site <- substr(rownames(site_scores), 1, 3)
+  site_scores$Site <- ifelse(site_scores$Site %in% c("XR1","XR2","XR3"), "XRT",
+                             ifelse(site_scores$Site %in% c("YR1","YR2","YR3"), "YRT",
+                                    ifelse(site_scores$Site == "QZG", "QZG", site_scores$Site)))
+  
+  
+  env_scores <- scores(rda_model, display = "bp") %>% as.data.frame()
+  env_scores$Factor <- rownames(env_scores)
+  
+
+  r2 <- summary(rda_model)$cont$importance
+  r2_axis1 <- round(r2[2, 1] * 100, 1)
+  r2_axis2 <- round(r2[2, 2] * 100, 1)
+  r2_cum <- round(r2[2, 1] + r2[2, 2], 1)
+  
+  
+  site_colors <- c("QZG" = "#E69F00", "XRT" = "#56B4E9", "YRT" = "#009E73")
+  
+  
+  max_rda <- max(abs(c(site_scores$RDA1, site_scores$RDA2, env_scores$RDA1, env_scores$RDA2)), na.rm = TRUE)
+  scale_factor <- max_rda / max(sqrt(env_scores$RDA1^2 + env_scores$RDA2^2)) * 0.8
+  
+  
+  p <- ggplot() +
+    
+    geom_point(data = site_scores, aes(x = RDA1, y = RDA2, color = Site), size = 3.5, alpha = 0.8) +
+    
+    stat_ellipse(data = site_scores, aes(x = RDA1, y = RDA2, color = Site), level = 0.95) +
+    
+    geom_segment(data = env_scores, aes(x = 0, y = 0, xend = RDA1 * scale_factor, yend = RDA2 * scale_factor),
+                 arrow = arrow(length = unit(0.25, "cm")), color = "red", size = 1.2) +
+    
+    geom_text(data = env_scores, aes(x = RDA1 * scale_factor * 1.1, y = RDA2 * scale_factor * 1.1, label = Factor),
+              size = 3.5, hjust = 0.5, vjust = -0.5, color = "black") +
+    
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", alpha = 0.7) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", alpha = 0.7) +
+    labs(x = paste0("RDA1 (", r2_axis1, "%)"),
+         y = paste0("RDA2 (", r2_axis2, "%)"),
+         title = paste(title, "RDA Biplot"),
+         subtitle = paste0("R² = ", r2_cum, "% (cumulative)")) +
+    scale_color_manual(values = site_colors) +
+    theme_bw() +
+    theme(legend.position = "right",
+          plot.subtitle = element_text(size = 10, face = "italic"))
+  
+  return(list(
+    model = rda_model,
+    anova_global = anova_global,
+    plot = p,
+    r2_axis1 = r2_axis1,
+    r2_axis2 = r2_axis2,
+    r2_cum = r2_cum
+  ))
+}
+
+
+rda_bac <- run_rda_all(bact_abund, env_scaled, "Bacteria")
+rda_fun <- run_rda_all(fung_abund, env_scaled, "Fungi")
+rda_keg <- run_rda_all(kegg_t, env_scaled, "KEGG Pathways")
+
+
+print(rda_bac$plot)
+print(rda_fun$plot)
+print(rda_keg$plot)
+
+ggsave("RDA_Bacteria_AllFactors_Red.pdf", rda_bac$plot, width = 8, height = 6)
+ggsave("RDA_Fungi_AllFactors_Red.pdf", rda_fun$plot, width = 8, height = 6)
+ggsave("RDA_KEGG_AllFactors_Red.pdf", rda_keg$plot, width = 8, height = 6)
+
+
+
+
+run_rda_with_terms <- function(comm_abund, env_scaled, title) {
+  comm_hel <- decostand(comm_abund, method = "hellinger")
+  rda_model <- rda(comm_hel ~ ., data = env_scaled)
+  
+  anova_global <- anova(rda_model, permutations = 999)
+  anova_terms <- anova(rda_model, by = "terms", permutations = 999)
+  
+  
+  r2 <- summary(rda_model)$cont$importance
+  r2_axis1 <- round(r2[2, 1] * 100, 1)
+  r2_axis2 <- round(r2[2, 2] * 100, 1)
+  r2_cum <- round(r2[2, 1] + r2[2, 2], 1)
+  
+ 
+  global_F <- anova_global$F[1]
+  global_p <- anova_global$`Pr(>F)`[1]
+  
+  
+  terms_df <- as.data.frame(anova_terms)
+  terms_df$Factor <- rownames(terms_df)
+  terms_df <- terms_df[, c("Factor", "F", "Pr(>F)")]
+  colnames(terms_df) <- c("Factor", "F", "p_value")
+  
+  return(list(
+    model = rda_model,
+    r2_axis1 = r2_axis1,
+    r2_axis2 = r2_axis2,
+    r2_cum = r2_cum,
+    global_F = global_F,
+    global_p = global_p,
+    terms = terms_df
+  ))
+}
+
+
+rda_bac <- run_rda_with_terms(bact_abund, env_scaled, "Bacteria")
+rda_fun <- run_rda_with_terms(fung_abund, env_scaled, "Fungi")
+rda_keg <- run_rda_with_terms(kegg_t, env_scaled, "KEGG Pathways")
+
+
+library(dplyr)
+library(tidyr)
+
+
+overall_df <- data.frame(
+  DataType = c("Bacteria", "Fungi", "KEGG"),
+  RDA1 = c(rda_bac$r2_axis1, rda_fun$r2_axis1, rda_keg$r2_axis1),
+  RDA2 = c(rda_bac$r2_axis2, rda_fun$r2_axis2, rda_keg$r2_axis2),
+  Cumulative_R2 = c(rda_bac$r2_cum, rda_fun$r2_cum, rda_keg$r2_cum),
+  F_Model = c(rda_bac$global_F, rda_fun$global_F, rda_keg$global_F),
+  p_Model = c(rda_bac$global_p, rda_fun$global_p, rda_keg$global_p)
+)
+
+overall_df$p_Model <- ifelse(overall_df$p_Model < 0.001, "< 0.001", round(overall_df$p_Model, 3))
+
+
+terms_bac <- rda_bac$terms
+terms_bac$DataType <- "Bacteria"
+terms_fun <- rda_fun$terms
+terms_fun$DataType <- "Fungi"
+terms_keg <- rda_keg$terms
+terms_keg$DataType <- "KEGG"
+
+terms_all <- bind_rows(terms_bac, terms_fun, terms_keg)
+terms_all <- terms_all[, c("DataType", "Factor", "F", "p_value")]
+terms_all$p_value <- ifelse(terms_all$p_value < 0.001, "< 0.001", round(terms_all$p_value, 3))
+
+
+write.csv(overall_df, "RDA_Overall_Results.csv", row.names = FALSE)
+write.csv(terms_all, "RDA_Terms_Results.csv", row.names = FALSE)
+
+
