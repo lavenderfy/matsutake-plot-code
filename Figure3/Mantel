@@ -1,0 +1,70 @@
+
+
+library(vegan)
+library(igraph)
+library(ggplot2)
+
+
+
+all_microbe_abund <- cbind(bact_abund, fung_abund)
+
+
+all_hel <- decostand(all_microbe_abund, method = "hellinger")
+dist_all <- vegdist(all_hel, method = "bray")
+
+
+factor_names <- colnames(env_scaled)
+mantel_results <- data.frame(Factor = factor_names, r = NA, p = NA)
+
+for (i in 1:length(factor_names)) {
+  dist_i <- dist(env_scaled[, i, drop = FALSE], method = "euclidean")
+  test <- mantel(dist_all, dist_i, method = "spearman", permutations = 999)
+  mantel_results$r[i] <- test$statistic
+  mantel_results$p[i] <- test$signif
+}
+
+
+sig_results <- mantel_results[mantel_results$p < 0.05, ]
+sig_results <- sig_results[order(sig_results$r, decreasing = TRUE), ]
+
+print(sig_results)
+
+
+nodes <- data.frame(
+  name = c("Microbial Community", sig_results$Factor),
+  type = c("community", rep("env", nrow(sig_results)))
+)
+
+
+edges <- data.frame(
+  from = "Microbial Community",
+  to = sig_results$Factor,
+  weight = sig_results$r,
+  p = sig_results$p
+)
+
+
+g <- graph_from_data_frame(edges, vertices = nodes, directed = FALSE)
+
+
+set.seed(123)
+layout <- layout_in_circle(g, order = c(1, 2:(nrow(nodes))))  
+
+
+edge_col <- ifelse(E(g)$weight > 0, "#D55E00", "#56B4E9")
+
+
+pdf("Mantel_Network_AllMicrobe.pdf", width = 8, height = 6)
+plot(g,
+     layout = layout,
+     vertex.size = ifelse(V(g)$type == "community", 35, 20),
+     vertex.color = ifelse(V(g)$type == "community", "#FFB347", "#87CEEB"),
+     vertex.label.cex = ifelse(V(g)$type == "community", 1.2, 0.9),
+     vertex.label.color = "black",
+     edge.color = edge_col,
+     edge.width = abs(E(g)$weight) * 5,
+     edge.arrow.size = 0,
+     main = "Mantel Network: Environmental Factors vs. Microbial Community")
+dev.off()
+
+write.csv(sig_results, "Mantel_Significant_AllMicrobe.csv", row.names = FALSE)
