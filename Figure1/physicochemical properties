@@ -1,1 +1,74 @@
 
+library(tidyverse)
+library(readxl)
+library(agricolae)
+
+
+data <- read_excel("D:/Rdata/SAK.xlsx")
+
+
+summary_stats <- data %>%
+  group_by(Site) %>%
+  summarise(
+    n = n(),
+    mean = mean(Value),
+    sd = sd(Value),
+    se = sd / sqrt(n)
+  )
+
+
+anova_model <- aov(Value ~ Site, data = data)
+summary(anova_model)
+
+tukey_result <- HSD.test(anova_model, "Site", group = TRUE)
+letters_df <- tukey_result$groups %>%
+  rownames_to_column("Site") %>%
+  select(Site, groups) %>%
+  rename(Letter = groups)
+
+
+plot_data <- summary_stats %>%
+  left_join(letters_df, by = "Site")
+
+
+ymax <- max(plot_data$mean + plot_data$sd)
+y_offset <- 0.05 * ymax
+plot_data$y_pos <- plot_data$mean + plot_data$sd + y_offset
+
+
+p <- ggplot(data, aes(x = Site, y = Value, fill = Site)) +
+ 
+  geom_bar(stat = "summary", fun = "mean", width = 0.6, show.legend = FALSE) +
+  
+  geom_errorbar(
+    data = plot_data,
+    aes(x = Site, ymin = mean - sd, ymax = mean + sd),
+    width = 0.2,
+    linewidth = 0.8,          
+    inherit.aes = FALSE       
+  ) +
+ 
+  geom_text(
+    data = plot_data,
+    aes(x = Site, y = y_pos, label = Letter),
+    size = 5,
+    fontface = "bold",
+    vjust = 0,
+    inherit.aes = FALSE       
+  ) +
+  labs(x = "Sampling Site", y = "SAK") +
+  scale_fill_manual(values = c("#E69F00", "#56B4E9", "#009E73")) +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 12, color = "black"),
+    axis.title = element_text(size = 14, face = "bold"),
+    axis.line = element_line(linewidth = 0.5),  
+    panel.grid.major.x = element_blank()
+  )
+
+
+print(p)
+
+
+ggsave("barplot_with_letters.pdf", plot = p, width = 6, height = 5, dpi = 600)
+ggsave("barplot_with_letters.png", plot = p, width = 6, height = 5, dpi = 600)
