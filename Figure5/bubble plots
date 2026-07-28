@@ -1,0 +1,131 @@
+
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+
+
+if (!exists("annot_all")) {
+  metab_pos <- read_excel("metabolomics_pos.xlsx", col_names = TRUE)
+  metab_neg <- read_excel("metabolomics_neg.xlsx", col_names = TRUE)
+  annot_pos <- metab_pos[, c("Kegg_ID", "KEGG_pathway", "Name")]
+  annot_neg <- metab_neg[, c("Kegg_ID", "KEGG_pathway", "Name")]
+  annot_all <- rbind(annot_pos, annot_neg)
+  annot_all <- annot_all[!duplicated(annot_all$Kegg_ID), ]
+}
+
+
+get_pathway_counts <- function(diff_data, 
+                               annot_table, 
+                               fc_threshold = 1, 
+                               p_threshold = 0.05,
+                               vip_threshold = 1,
+                               min_count = 2) {
+  
+  
+  if (!"Significant" %in% colnames(diff_data)) {
+    diff_data$Significant <- ifelse(
+      abs(diff_data$logFC) > fc_threshold & 
+        diff_data$P.Value < p_threshold & 
+        (if("VIP" %in% colnames(diff_data)) diff_data$VIP > vip_threshold else TRUE),
+      "Significant", "Not Significant"
+    )
+  }
+  
+  
+  sig_metabs <- diff_data$Metabolite[diff_data$Significant == "Significant"]
+  
+  if (length(sig_metabs) == 0) {
+    
+    return(NULL)
+  }
+  
+  
+  diff_anno <- annot_table[annot_table$Kegg_ID %in% sig_metabs, ]
+  
+  if (nrow(diff_anno) == 0) {
+    
+    return(NULL)
+  }
+  
+  
+  pathway_counts <- diff_anno %>%
+    separate_rows(KEGG_pathway, sep = ";") %>%
+    filter(KEGG_pathway != "" & !is.na(KEGG_pathway) & 
+           KEGG_pathway != "--" & KEGG_pathway != "-") %>%
+    group_by(KEGG_pathway) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    filter(Count >= min_count) %>%
+    arrange(desc(Count))
+  
+  return(pathway_counts)
+}
+
+
+plot_pathway_bubble <- function(pathway_counts, 
+                                title = "KEGG Pathway Enrichment",
+                                color_by = "Count",
+                                max_pathways = 15) {
+  
+  if (is.null(pathway_counts) || nrow(pathway_counts) == 0) {
+    
+    return(NULL)
+  }
+  
+  
+  plot_data <- pathway_counts %>%
+    head(max_pathways) %>%
+    mutate(
+      
+      Pathway_Short = gsub("map[0-9]+\\s+", "", KEGG_pathway),
+      
+      Pathway_Short = ifelse(nchar(Pathway_Short) > 40, 
+                             paste0(substr(Pathway_Short, 1, 37), "..."), 
+                             Pathway_Short)
+    )
+  
+  
+  plot_data$Pathway_Short <- factor(plot_data$Pathway_Short, 
+                                     levels = rev(plot_data$Pathway_Short))
+  
+  p <- ggplot(plot_data, aes(x = Count, y = Pathway_Short)) +
+    geom_point(aes(size = Count, color = Count)) +
+    scale_size_continuous(range = c(2, 10), guide = "none") +
+    scale_color_gradient(low = "#56B4E9", high = "#D55E00", name = "Count") +
+    labs(x = "Number of Differential Metabolites",
+         y = "",
+         title = title) +
+    theme_bw() +
+    theme(axis.text.y = element_text(size = 9),
+          axis.title.x = element_text(size = 11),
+          plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+          legend.position = "right")
+  
+  return(p)
+}
+
+
+pathway_root_vs_stipe <- get_pathway_counts(diff_root_vs_stipe, annot_all)
+pathway_root_vs_pileus <- get_pathway_counts(diff_root_vs_pileus, annot_all)
+pathway_stipe_vs_pileus <- get_pathway_counts(diff_stipe_vs_pileus, annot_all)
+
+
+p1 <- plot_pathway_bubble(pathway_root_vs_stipe, "Root vs Stipe")
+p2 <- plot_pathway_bubble(pathway_root_vs_pileus, "Root vs Pileus")
+p3 <- plot_pathway_bubble(pathway_stipe_vs_pileus, "Stipe vs Pileus")
+
+
+print(p1)
+print(p2)
+print(p3)
+
+ggsave("Pathway_RootvsStipe.pdf", p1, width = 8, height = 6)
+ggsave("Pathway_RootvsPileus.pdf", p2, width = 8, height = 6)
+ggsave("Pathway_StipevsPileus.pdf", p3, width = 8, height = 6)
+
+
+combined <- (p1 + p2 + p3) + 
+  plot_annotation(title = "KEGG Pathway Enrichment (Three Comparisons)") +
+  plot_layout(guides = "collect")
+
+ggsave("Pathway_Combined.pdf", combined, width = 24, height = 8)
+
