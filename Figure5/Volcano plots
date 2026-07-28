@@ -1,0 +1,98 @@
+
+
+library(ggplot2)
+library(ggrepel)
+library(patchwork)
+
+
+plot_volcano <- function(diff_data, 
+                         comp_name, 
+                         x_label = "log2 Fold Change",
+                         fc_threshold = 1,
+                         p_threshold = 0.05,
+                         vip_threshold = 1,
+                         label_top_n = 10,
+                         colors = c("Not Significant" = "gray", 
+                                    "Significant" = "firebrick")) {
+  
+  
+  if (!"VIP" %in% colnames(diff_data)) {
+    diff_data$VIP <- 1  
+    
+  }
+  
+  
+  diff_data$Significant <- ifelse(
+    abs(diff_data$logFC) > fc_threshold & 
+      diff_data$P.Value < p_threshold & 
+      diff_data$VIP > vip_threshold,
+    "Significant", "Not Significant"
+  )
+  
+  
+  sig_data <- diff_data[diff_data$Significant == "Significant", ]
+  if (nrow(sig_data) > 0) {
+    top_sig <- sig_data[order(sig_data$P.Value), ][1:min(label_top_n, nrow(sig_data)), ]
+    diff_data$Label <- ifelse(diff_data$Metabolite %in% top_sig$Metabolite, 
+                              diff_data$Metabolite, "")
+  } else {
+    diff_data$Label <- ""
+  }
+  
+  
+  n_sig <- sum(diff_data$Significant == "Significant")
+  n_total <- nrow(diff_data)
+  
+  
+  p <- ggplot(diff_data, aes(x = logFC, y = -log10(P.Value), color = Significant)) +
+    geom_point(alpha = 0.5, size = 2) +
+    geom_vline(xintercept = c(-fc_threshold, fc_threshold), linetype = "dashed", alpha = 0.5) +
+    geom_hline(yintercept = -log10(p_threshold), linetype = "dashed", alpha = 0.5) +
+    geom_text_repel(aes(label = Label), size = 3, max.overlaps = 15, box.padding = 0.5) +
+    labs(x = x_label,
+         y = "-log10(p-value)",
+         title = comp_name,
+         subtitle = paste0("Significant: ", n_sig, " / ", n_total, " metabolites")) +
+    scale_color_manual(values = colors) +
+    theme_bw() +
+    theme(legend.position = "bottom",
+          plot.title = element_text(hjust = 0.5, face = "bold"),
+          plot.subtitle = element_text(hjust = 0.5))
+  
+  return(p)
+}
+
+
+
+
+if (exists("vip_df")) {
+  
+  diff_root_vs_stipe <- merge(diff_root_vs_stipe, vip_df, by = "Metabolite", all.x = TRUE)
+  diff_root_vs_pileus <- merge(diff_root_vs_pileus, vip_df, by = "Metabolite", all.x = TRUE)
+  diff_stipe_vs_pileus <- merge(diff_stipe_vs_pileus, vip_df, by = "Metabolite", all.x = TRUE)
+  
+  diff_root_vs_stipe$VIP[is.na(diff_root_vs_stipe$VIP)] <- 1
+  diff_root_vs_pileus$VIP[is.na(diff_root_vs_pileus$VIP)] <- 1
+  diff_stipe_vs_pileus$VIP[is.na(diff_stipe_vs_pileus$VIP)] <- 1
+} else {
+  
+}
+
+
+p1 <- plot_volcano(diff_root_vs_stipe, "Root vs Stipe", "log2 FC (Root vs Stipe)")
+p2 <- plot_volcano(diff_root_vs_pileus, "Root vs Pileus", "log2 FC (Root vs Pileus)")
+p3 <- plot_volcano(diff_stipe_vs_pileus, "Stipe vs Pileus", "log2 FC (Stipe vs Pileus)")
+
+
+print(p1)
+print(p2)
+print(p3)
+
+ggsave("Volcano_RootvsStipe.pdf", p1, width = 7, height = 6)
+ggsave("Volcano_RootvsPileus.pdf", p2, width = 7, height = 6)
+ggsave("Volcano_StipevsPileus.pdf", p3, width = 7, height = 6)
+
+
+combined <- p1 + p2 + p3 + plot_annotation(title = "Metabolomics Volcano Plots")
+ggsave("Volcano_Combined.pdf", combined, width = 21, height = 7)
+
