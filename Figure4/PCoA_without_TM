@@ -1,0 +1,76 @@
+
+library(vegan)
+library(ggplot2)
+
+
+
+if ("Tricholoma" %in% colnames(all_fungi)) {
+  
+  
+  all_fungi_no_t <- all_fungi[, !colnames(all_fungi) %in% "Tricholoma"]
+} else {
+  
+  all_fungi_no_t <- all_fungi
+}
+
+
+
+
+all_fungi_num_no_t <- all_fungi_no_t[, !colnames(all_fungi_no_t) %in% c("Site", "Part")]
+all_fungi_parts <- all_fungi_no_t[, c("Site", "Part")]
+
+
+all_fungi_hel_no_t <- decostand(all_fungi_num_no_t, method = "hellinger")
+
+
+dist_fungi_no_t <- vegdist(all_fungi_hel_no_t, method = "bray")
+
+
+pcoa_fungi_no_t <- cmdscale(dist_fungi_no_t, k = 2, eig = TRUE)
+
+
+pcoa_scores_no_t <- as.data.frame(pcoa_fungi_no_t$points)
+colnames(pcoa_scores_no_t) <- c("PCoA1", "PCoA2")
+
+
+pcoa_scores_no_t$Site <- all_fungi_parts$Site
+pcoa_scores_no_t$Part <- all_fungi_parts$Part
+
+
+eig_no_t <- pcoa_fungi_no_t$eig
+var1_no_t <- round(eig_no_t[1] / sum(eig_no_t) * 100, 1)
+var2_no_t <- round(eig_no_t[2] / sum(eig_no_t) * 100, 1)
+
+
+p_pcoa_f_no_t <- ggplot(pcoa_scores_no_t, aes(x = PCoA1, y = PCoA2, 
+                                                color = Site, shape = Part)) +
+  geom_point(size = 3, alpha = 0.8) +
+  stat_ellipse(aes(group = interaction(Site, Part)), 
+               linetype = "dashed", alpha = 0.2) +
+  labs(x = paste0("PCoA1 (", var1_no_t, "%)"),
+       y = paste0("PCoA2 (", var2_no_t, "%)"),
+       title = "Fungal Community PCoA (without Tricholoma)") +
+  theme_bw() +
+  scale_color_manual(values = c("QZG" = "#E69F00", 
+                                "XRT" = "#56B4E9", 
+                                "YRT" = "#009E73")) +
+  scale_shape_manual(values = c("soil" = 16, "root" = 17, 
+                                "stipe" = 15, "pileus" = 18)) +
+  theme(legend.position = "right",
+        axis.text = element_text(size = 11),
+        axis.title = element_text(size = 13))
+
+
+print(p_pcoa_f_no_t)
+
+
+ggsave("PCoA_Fungi_without_Tricholoma.pdf", p_pcoa_f_no_t, width = 7, height = 5)
+
+
+ggsave("PCoA_Fungi_without_Tricholoma.png", p_pcoa_f_no_t, width = 7, height = 5, dpi = 300)
+
+
+permanova_no_t <- adonis2(dist_fungi_no_t ~ Part * Site, 
+                          data = all_fungi_parts, 
+                          permutations = 999, by = "terms")
+print(permanova_no_t)
