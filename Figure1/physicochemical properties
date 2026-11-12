@@ -1,74 +1,59 @@
+source("00_setup.R")
+sp   <- rd("Fig1B_physchem_spearman.csv")
+sc   <- rd("Fig1C_physchem_pca_scores.csv")
+ld   <- rd("Fig1C_physchem_pca_loadings.csv")
 
-library(tidyverse)
-library(readxl)
-library(agricolae)
+## ---- 1B 相关矩阵（下三角 + 数值） ----
+vars <- unique(c(sp$var1, sp$var2))
+mat  <- matrix(NA, length(vars), length(vars), dimnames = list(vars, vars))
+for (i in seq_len(nrow(sp))) { mat[sp$var1[i], sp$var2[i]] <- sp$rho[i]; mat[sp$var2[i], sp$var1[i]] <- sp$rho[i] }
+diag(mat) <- 1
+d1 <- as.data.frame(as.table(mat)); names(d1) <- c("var1", "var2", "rho")
+d1$var1 <- factor(d1$var1, levels = rev(vars)); d1$var2 <- factor(d1$var2, levels = vars)
+p1B <- ggplot(d1, aes(var2, var1, fill = rho)) +
+  geom_tile(colour = "white", linewidth = 0.2) +
+  geom_text(aes(label = ifelse(is.na(rho), "", sprintf("%.2f", rho)),
+                colour = abs(rho) > 0.62), size = 1.6, show.legend = FALSE) +
+  scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "grey15")) +
+  scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182B",
+                       midpoint = 0, limits = c(-1, 1), name = "Spearman \u03c1") +
+  labs(x = NULL, y = NULL, title = "Soil physicochemical correlation (n = 15)") +
+  theme_scid() + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+                       legend.position = "right", legend.key.width = unit(0.25, "cm"))
+save_panel(p1B, "Fig1B_correlation", w = 3.6, h = 3.2)
 
+## ---- 1C PCA 双序 ----
+load_pct <- c(70.8, 28.7)          # 与 rawdata/Fig1C 一致，可在 R 内重算核对
+p1C <- ggplot(sc, aes(PC1, PC2)) +
+  geom_hline(yintercept = 0, linewidth = 0.2, colour = "grey85") +
+  geom_vline(xintercept = 0, linewidth = 0.2, colour = "grey85") +
+  geom_segment(data = ld, aes(x = 0, y = 0, xend = PC1 * 3.4, yend = PC2 * 3.4),
+               arrow = arrow(length = unit(0.06, "cm")), linewidth = 0.3, colour = "grey35") +
+  geom_text(data = ld, aes(x = PC1 * 3.9, y = PC2 * 3.9, label = variable),
+            size = 1.9, colour = "grey25") +
+  geom_point(aes(colour = site, shape = site), size = 1.6, stroke = 0.2) +
+  scale_colour_manual(values = PAL_SHIRO) +
+  scale_shape_manual(values = c(QZG = 16, XR = 15, YR = 17)) +
+  labs(x = sprintf("PC1 (%.1f%%)", load_pct[1]), y = sprintf("PC2 (%.1f%%)", load_pct[2]),
+       title = "Physicochemical PCA") +
+  theme_scid() + theme(legend.position = "inside", legend.position.inside = c(0.85, 0.15))
+save_panel(p1C, "Fig1C_pca", w = 3.4, h = 3.2)
 
-data <- read_excel("D:/Rdata/SAK.xlsx")
-
-
-summary_stats <- data %>%
-  group_by(Site) %>%
-  summarise(
-    n = n(),
-    mean = mean(Value),
-    sd = sd(Value),
-    se = sd / sqrt(n)
-  )
-
-
-anova_model <- aov(Value ~ Site, data = data)
-summary(anova_model)
-
-tukey_result <- HSD.test(anova_model, "Site", group = TRUE)
-letters_df <- tukey_result$groups %>%
-  rownames_to_column("Site") %>%
-  select(Site, groups) %>%
-  rename(Letter = groups)
-
-
-plot_data <- summary_stats %>%
-  left_join(letters_df, by = "Site")
-
-
-ymax <- max(plot_data$mean + plot_data$sd)
-y_offset <- 0.05 * ymax
-plot_data$y_pos <- plot_data$mean + plot_data$sd + y_offset
-
-
-p <- ggplot(data, aes(x = Site, y = Value, fill = Site)) +
- 
-  geom_bar(stat = "summary", fun = "mean", width = 0.6, show.legend = FALSE) +
-  
-  geom_errorbar(
-    data = plot_data,
-    aes(x = Site, ymin = mean - sd, ymax = mean + sd),
-    width = 0.2,
-    linewidth = 0.8,          
-    inherit.aes = FALSE       
-  ) +
- 
-  geom_text(
-    data = plot_data,
-    aes(x = Site, y = y_pos, label = Letter),
-    size = 5,
-    fontface = "bold",
-    vjust = 0,
-    inherit.aes = FALSE       
-  ) +
-  labs(x = "Sampling Site", y = "SAK") +
-  scale_fill_manual(values = c("#E69F00", "#56B4E9", "#009E73")) +
-  theme_bw() +
-  theme(
-    axis.text = element_text(size = 12, color = "black"),
-    axis.title = element_text(size = 14, face = "bold"),
-    axis.line = element_line(linewidth = 0.5),  
-    panel.grid.major.x = element_blank()
-  )
-
-
-print(p)
-
-
-ggsave("barplot_with_letters.pdf", plot = p, width = 6, height = 5, dpi = 600)
-ggsave("barplot_with_letters.png", plot = p, width = 6, height = 5, dpi = 600)
+## ---- 1D 10 项理化指标 z 值热图（15 个样品） ----
+env <- rd("input_env_physchem.csv")
+vars <- c("PH","OM","TC","TN","AHN","TP","AP","TK","SAK","RAK")
+ord  <- unlist(lapply(c("QZG","XR","YR"), function(s)
+  paste0(s, "T", 1:5)))
+d1D <- env %>% mutate(sample = factor(sample, levels = ord)) %>%
+  pivot_longer(all_of(vars), names_to = "var", values_to = "value") %>%
+  group_by(var) %>% mutate(z = as.numeric(scale(value))) %>% ungroup() %>%
+  mutate(sample = factor(as.character(sample), levels = rev(ord)),
+         var = factor(var, levels = vars))
+p1D <- ggplot(d1D, aes(var, sample, fill = z)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182B", midpoint = 0,
+                       limits = c(-2, 2), oob = squish, name = "z-score") +
+  labs(x = NULL, y = NULL, title = "Ten soil properties across the 15 samples (z-score)") +
+  theme_scid() + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+save_panel(p1D, "Fig1D_heatmap", w = 5.6, h = 2.6)
+cat("[01] Fig1 done\n")
